@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FoundIdSchema, FoundIdFormValues } from "@/types";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
@@ -43,9 +43,6 @@ export default function ReportFoundId() {
   const [agreed, setAgreed] = useState(false);
   const [showPreview, setShowConfirmation] = useState(false);
   
-  const [month, setMonth] = useState("");
-  const [day, setDay] = useState("");
-  const [year, setYear] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState("Analyzing...");
@@ -53,7 +50,6 @@ export default function ReportFoundId() {
   const [extractedData, setExtractedData] = useState<{
     fullName?: string;
     idNumber?: string;
-    dob?: string;
   }>({});
   
   const router = useRouter();
@@ -63,7 +59,6 @@ export default function ReportFoundId() {
     resolver: zodResolver(FoundIdSchema),
     defaultValues: {
       fullName: "",
-      dob: "",
       idNumber: "",
       foundLocation: "",
       finderName: profile?.fullName || "",
@@ -71,34 +66,6 @@ export default function ReportFoundId() {
       finderEmail: profile?.email || "",
     },
   });
-
-  const months = [
-    { value: "01", label: "January" },
-    { value: "02", label: "February" },
-    { value: "03", label: "March" },
-    { value: "04", label: "April" },
-    { value: "05", label: "May" },
-    { value: "06", label: "June" },
-    { value: "07", label: "July" },
-    { value: "08", label: "August" },
-    { value: "09", label: "September" },
-    { value: "10", label: "October" },
-    { value: "11", label: "November" },
-    { value: "12", label: "December" },
-  ];
-
-  const days = Array.from({ length: 31 }, (_, i) => (i + 1).toString().padStart(2, '0'));
-  const years = Array.from({ length: 100 }, (_, i) => (new Date().getFullYear() - i).toString());
-
-  const getFormattedDate = () => {
-    if (!month || !day || !year) return null;
-    try {
-      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-      return format(date, "do MMMM yyyy");
-    } catch (e) {
-      return null;
-    }
-  };
 
   const processIdImage = async (file: File) => {
     // 10MB Limit
@@ -178,15 +145,7 @@ export default function ReportFoundId() {
         setExtractedData(prev => ({ ...prev, fullName: name }));
       }
 
-      // 3. Extract DOB - Improved regex for "08.01. 1954" or "08.01.1954"
-      const dobMatch = text.match(/(\d{2})[./\s](\d{2})[./\s]\s*(\d{4})/);
-      if (dobMatch) {
-        const [_, d, m, y] = dobMatch;
-        newExtractedData.dob = `${y}-${m}-${d}`;
-        setExtractedData(prev => ({ ...prev, dob: `${d}.${m}.${y}` }));
-      }
-
-      if (!newExtractedData.idNumber && !newExtractedData.fullName && !newExtractedData.dob) {
+      if (!newExtractedData.idNumber && !newExtractedData.fullName) {
         throw new Error("Could not find the details. Please try again.");
       }
 
@@ -197,13 +156,6 @@ export default function ReportFoundId() {
 
       if (newExtractedData.idNumber) form.setValue('idNumber', newExtractedData.idNumber);
       if (newExtractedData.fullName) form.setValue('fullName', newExtractedData.fullName);
-      if (newExtractedData.dob) {
-        const [d, m, y] = newExtractedData.dob.split('.');
-        setDay(d);
-        setMonth(m);
-        setYear(y);
-        form.setValue('dob', `${y}-${m}-${d}`);
-      }
 
       setShowScanModal(false);
       toast({
@@ -273,6 +225,18 @@ export default function ReportFoundId() {
     setLoading(true);
     const values = form.getValues();
     try {
+      // Check if ID already exists
+      const { query, where, getDocs, collection } = await import("firebase/firestore");
+      const q = query(
+        collection(db, "found_ids"),
+        where("idNumber", "==", values.idNumber)
+      );
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        throw new Error("This ID has already been reported as found. Please check the search page.");
+      }
+
       await addDoc(collection(db, "found_ids"), {
         ...values,
         finderName: profile?.fullName || user.displayName || "",
@@ -282,6 +246,61 @@ export default function ReportFoundId() {
         createdBy: user.uid,
         createdAt: serverTimestamp(),
       });
+
+      // Send Report Confirmation Email to Finder
+      try {
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: profile?.email || user.email,
+            type: "REPORT_CONFIRMATION",
+            idNumber: values.idNumber,
+            finderName: profile?.fullName || user.displayName || user.email?.split('@')[0],
+            location: values.foundLocation,
+          }),
+        });
+      } catch (e) {
+        console.error("Failed to send report confirmation email", e);
+      }
+
+      // CHECK FOR WATCHLIST MATCHES
+      try {
+        const watchQuery = query(
+          collection(db, "id_watch_list"),
+          where("idNumber", "==", values.idNumber),
+          where("status", "==", "pending")
+        );
+        const watchSnapshot = await getDocs(watchQuery);
+        
+        if (!watchSnapshot.empty) {
+          // Notify each user who was watching this ID
+          for (const watchDoc of watchSnapshot.docs) {
+            const watchData = watchDoc.data();
+            
+            // Call our internal notification API with MATCH_FOUND type
+            await fetch("/api/notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                toEmail: watchData.email,
+                type: "MATCH_FOUND",
+                idNumber: values.idNumber,
+                ownerName: watchData.email.split('@')[0], // Fallback if no name
+              }),
+            });
+
+            // Update status to notified
+            await updateDoc(doc(db, "id_watch_list", watchDoc.id), {
+              status: "notified",
+              notifiedAt: serverTimestamp()
+            });
+          }
+        }
+      } catch (notifyError) {
+        console.error("Notification match error:", notifyError);
+        // We don't throw here so the main report still succeeds
+      }
 
       toast({
         title: "ID Reported Successfully",
@@ -327,86 +346,37 @@ export default function ReportFoundId() {
         </CardHeader>
         <CardContent className="pt-8">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-8">
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-8 flex items-start gap-4">
+                  <div className="p-2 bg-amber-100 rounded-xl">
+                    <ShieldCheck className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider">Verification Guide for Heroes</h4>
+                    <p className="text-amber-700 text-sm mt-1 leading-relaxed">
+                      To keep things simple, we no longer ask for the Date of Birth here. Instead, when someone contacts you to claim this ID, **please ask them to verify these 4 details** to be 100% sure they are the owner:
+                    </p>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
+                      {['Date of Birth', 'Place of Issue', 'Place of Birth', 'County / Ward'].map((item) => (
+                        <li key={item} className="flex items-center gap-2 text-sm font-bold text-amber-800 bg-amber-100/50 px-3 py-2 rounded-lg">
+                          <CheckCircle2 className="h-4 w-4 text-amber-600" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-8 relative">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <FormField
                   control={form.control}
                   name="fullName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Full Name on ID</FormLabel>
+                      <FormLabel className="text-sm font-bold text-slate-500 uppercase tracking-wider">Full Names on ID</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. Frank Bosire" {...field} className="h-12 rounded-xl border-slate-200" />
+                        <Input placeholder="Enter all names exactly as on card" {...field} className="h-14 rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500/10 transition-all text-lg font-medium" />
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="idNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>ID Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 41169043" {...field} className="h-12 rounded-xl border-slate-200" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="dob"
-                  render={({ field }) => (
-                    <FormItem className="space-y-3">
-                      <FormLabel>Date of Birth on ID</FormLabel>
-                      <FormControl>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Month</span>
-                            <CustomSelect
-                              value={month}
-                              onChange={(val) => {
-                                setMonth(val);
-                                if (day && year) field.onChange(`${year}-${val}-${day}`);
-                              }}
-                              options={months}
-                              placeholder="Month"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Day</span>
-                            <CustomSelect
-                              value={day}
-                              onChange={(val) => {
-                                setDay(val);
-                                if (month && year) field.onChange(`${year}-${month}-${val}`);
-                              }}
-                              options={days.map((d) => ({ value: d, label: d }))}
-                              placeholder="Day"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Year</span>
-                            <CustomSelect
-                              value={year}
-                              onChange={(val) => {
-                                setYear(val);
-                                if (month && day) field.onChange(`${val}-${month}-${day}`);
-                              }}
-                              options={years.map((y) => ({ value: y, label: y }))}
-                              placeholder="Year"
-                            />
-                          </div>
-                        </div>
-                      </FormControl>
-                      {getFormattedDate() && !form.formState.errors.dob && (
-                        <p className="text-xs font-medium text-slate-500 ml-1">
-                          Selected: <span className="text-black">{getFormattedDate()}</span>
-                        </p>
-                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -414,16 +384,28 @@ export default function ReportFoundId() {
 
                 <FormField
                   control={form.control}
+                  name="idNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-sm font-bold text-slate-500 uppercase tracking-wider">ID Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Enter ID number" {...field} className="h-14 rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500/10 transition-all text-lg font-medium" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-8 mt-8">
+                <FormField
+                  control={form.control}
                   name="foundLocation"
                   render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Where did you find it?</FormLabel>
+                    <FormItem>
+                      <FormLabel className="text-sm font-bold text-slate-500 uppercase tracking-wider">Where did you find it?</FormLabel>
                       <FormControl>
-                        <Textarea 
-                          placeholder="e.g. Niliipata kwa basi ya Supermetro from Town to Juja." 
-                          {...field} 
-                          className="min-h-[100px] rounded-xl border-slate-200 py-3 resize-y focus:min-h-[150px] transition-all duration-300" 
-                        />
+                        <Input placeholder="e.g. Westlands Matatu Stage, near Java" {...field} className="h-14 rounded-2xl border-slate-200 focus:border-blue-500 focus:ring-blue-500/10 transition-all text-lg font-medium" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -577,23 +559,6 @@ export default function ReportFoundId() {
                           )}
                         </AnimatePresence>
                       </div>
-                      <div className="flex justify-between items-center h-8">
-                        <span className="text-[11px] text-slate-400 font-medium">Date of Birth</span>
-                        <AnimatePresence mode="wait">
-                          {extractedData.dob ? (
-                            <motion.span 
-                              key="dob-val"
-                              initial={{ opacity: 0, x: 10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              className="text-sm font-bold text-slate-900"
-                            >
-                              {extractedData.dob}
-                            </motion.span>
-                          ) : (
-                            <div key="dob-load" className="h-4 w-20 bg-slate-200 animate-pulse rounded" />
-                          )}
-                        </AnimatePresence>
-                      </div>
                     </div>
                   </div>
                 </motion.div>
@@ -660,11 +625,6 @@ export default function ReportFoundId() {
                   <div className="space-y-0.5">
                     <span className="text-[8px] font-bold text-slate-500 uppercase">Full Names</span>
                     <p className="text-[10px] font-black uppercase text-slate-900 leading-none">{form.getValues("fullName")}</p>
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <span className="text-[8px] font-bold text-slate-500 uppercase">Date of Birth</span>
-                    <p className="text-[10px] font-black text-slate-900">{getFormattedDate()}</p>
                   </div>
 
                   <div className="space-y-0.5">

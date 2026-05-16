@@ -14,7 +14,8 @@ import {
   Shield,
   Loader2,
   AlertCircle,
-  ArrowRight
+  ArrowRight,
+  Bell
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -29,6 +30,7 @@ const menuItems = [
   { name: "Search ID", href: "/dashboard/search", icon: Search },
   { name: "Report Found ID", href: "/dashboard/report", icon: PlusCircle },
   { name: "My Uploads", href: "/dashboard/my-uploads", icon: FileText },
+  { name: "My Watchlist", href: "/dashboard/watchlist", icon: Bell },
   { name: "My Claims", href: "/dashboard/claims", icon: UserCheck },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

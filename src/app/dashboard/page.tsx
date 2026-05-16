@@ -9,7 +9,8 @@ import {
   UserCheck,
   PlusCircle,
   ArrowUpRight,
-  Search
+  Search,
+  Bell
 } from "lucide-react";
 import { collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -26,6 +27,7 @@ export default function DashboardOverview() {
     pending: 0,
     ownerFound: 0,
     recovered: 0,
+    watchlist: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -38,11 +40,16 @@ export default function DashboardOverview() {
         const q = query(collection(db, "found_ids"), where("createdBy", "==", user.uid));
         const snapshot = await getDocs(q);
         
+        // Fetch watchlist count
+        const watchQ = query(collection(db, "id_watch_list"), where("userId", "==", user.uid));
+        const watchSnapshot = await getDocs(watchQ);
+        
         const counts = {
           total: snapshot.size,
           pending: 0,
           ownerFound: 0,
           recovered: 0,
+          watchlist: watchSnapshot.size,
         };
 
         snapshot.forEach((doc) => {
@@ -66,7 +73,7 @@ export default function DashboardOverview() {
 
   const statCards = [
     { title: "Total IDs Uploaded", value: stats.total, icon: FileText, color: "text-blue-600", bg: "bg-blue-50" },
-    { title: "Pending", value: stats.pending, icon: Clock, color: "text-yellow-600", bg: "bg-yellow-50" },
+    { title: "Active Watchlist", value: stats.watchlist, icon: Bell, color: "text-purple-600", bg: "bg-purple-50" },
     { title: "Owner Found", value: stats.ownerFound, icon: UserCheck, color: "text-indigo-600", bg: "bg-indigo-50" },
     { title: "Recovered", value: stats.recovered, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
   ];

@@ -9,6 +9,8 @@ import {
   doc, 
   updateDoc, 
   addDoc, 
+  setDoc,
+  getDoc,
   serverTimestamp 
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -24,7 +26,9 @@ import {
   ShieldCheck, 
   Phone, 
   Mail, 
-  CheckCircle2 
+  CheckCircle2,
+  Bell,
+  AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -38,39 +42,85 @@ export default function SearchIdPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const [idNumber, setIdNumber] = useState(searchParams.get("idNumber") || "");
-  const [month, setMonth] = useState(searchParams.get("month") || "");
-  const [day, setDay] = useState(searchParams.get("day") || "");
-  const [year, setYear] = useState(searchParams.get("year") || "");
   
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [notifying, setNotifying] = useState(false);
   const [results, setResults] = useState<FoundId[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [claimedId, setClaimedId] = useState<FoundId | null>(null);
   const { toast } = useToast();
 
-  const performSearch = useCallback(async (searchId: string, searchMonth: string, searchDay: string, searchYear: string) => {
-    if (!searchId || !searchMonth || !searchDay || !searchYear) return;
+  const handleWatchID = async () => {
+    if (!user || !idNumber) return;
+
+    setNotifying(true);
+    try {
+      const watchId = `${user.uid}_${idNumber}`;
+      const watchRef = doc(db, "id_watch_list", watchId);
+      const watchSnap = await getDoc(watchRef);
+
+      if (watchSnap.exists()) {
+        toast({
+          title: "Already watching",
+          description: "You have already requested a notification for this ID.",
+        });
+        router.push("/dashboard/watchlist");
+        return;
+      }
+      
+      await setDoc(watchRef, {
+        idNumber,
+        userId: user.uid,
+        email: user.email,
+        createdAt: serverTimestamp(),
+        status: "pending"
+      });
+
+      // Send Watch Request Confirmation Email
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toEmail: user.email,
+          type: "WATCH_REQUEST",
+          idNumber,
+          ownerName: user.displayName || user.email?.split('@')[0],
+        }),
+      });
+
+      toast({
+        title: "Alert set!",
+        description: `We'll notify you if ID ${idNumber} is reported.`,
+      });
+
+      // Redirect to watchlist page to show the new record
+      router.push("/dashboard/watchlist");
+    } catch (error: any) {
+      toast({
+        title: "Failed to set alert",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setNotifying(false);
+    }
+  };
+
+  const performSearch = useCallback(async (searchId: string) => {
+    if (!searchId) return;
 
     setLoading(true);
     setHasSearched(true);
+    setResults([]); // Clear previous results
     try {
-      const dob = `${searchYear}-${searchMonth.padStart(2, '0')}-${searchDay.padStart(2, '0')}`;
       const q = query(
         collection(db, "found_ids"),
-        where("idNumber", "==", searchId),
-        where("dob", "==", dob)
+        where("idNumber", "==", searchId)
       );
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FoundId));
       setResults(data);
-      
-      if (data.length === 0) {
-        toast({
-          title: "No results found",
-          description: "We couldn't find an ID with that number and date of birth.",
-        });
-      }
     } catch (error: any) {
       toast({
         title: "Search Failed",
@@ -84,18 +134,13 @@ export default function SearchIdPage() {
 
   useEffect(() => {
     if (searchParams.get("idNumber")) {
-      performSearch(
-        searchParams.get("idNumber")!,
-        searchParams.get("month")!,
-        searchParams.get("day")!,
-        searchParams.get("year")!
-      );
+      performSearch(searchParams.get("idNumber")!);
     }
   }, [searchParams, performSearch]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    performSearch(idNumber, month, day, year);
+    performSearch(idNumber);
   };
 
   const handleClaim = async (foundId: FoundId) => {
@@ -122,6 +167,23 @@ export default function SearchIdPage() {
       });
 
       setClaimedId(foundId);
+
+      // Send ID_CLAIMED email to Finder
+      try {
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: foundId.finderEmail,
+            type: "ID_CLAIMED",
+            idNumber: foundId.idNumber,
+            finderName: foundId.finderName,
+          }),
+        });
+      } catch (e) {
+        console.error("Failed to send claim notification email", e);
+      }
+
       toast({
         title: "Claim Initiated!",
         description: "Status updated to Owner Found. You can now see the finder's details.",
@@ -243,108 +305,88 @@ export default function SearchIdPage() {
               required
             />
           </div>
-          <div className="flex-[1.5] w-full flex items-center gap-2 bg-white/10 border border-white/10 rounded-xl px-3 h-14 overflow-visible">
-            <CustomSelect
-              value={month}
-              onChange={setMonth}
-              options={months}
-              placeholder="Month"
-              triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/30 hover:border-none focus:ring-0"
-              dropdownClassName="bg-slate-900 border-white/10 text-white"
-            />
-            <div className="w-px h-6 bg-white/10" />
-            <CustomSelect
-              value={day}
-              onChange={setDay}
-              options={days.map((d) => ({ value: d, label: d }))}
-              placeholder="Day"
-              triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/30 hover:border-none focus:ring-0"
-              dropdownClassName="bg-slate-900 border-white/10 text-white"
-            />
-            <div className="w-px h-6 bg-white/10" />
-            <CustomSelect
-              value={year}
-              onChange={setYear}
-              options={years.map((y) => ({ value: y, label: y }))}
-              placeholder="Year"
-              triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/30 hover:border-none focus:ring-0"
-              dropdownClassName="bg-slate-900 border-white/10 text-white"
-            />
-          </div>
           <Button
             type="submit"
             disabled={loading}
-            className="w-full lg:w-auto h-14 px-10 bg-white text-black hover:bg-slate-100 rounded-xl font-bold text-base transition-all active:scale-95 shadow-lg shadow-white/5"
+            className="w-full lg:w-auto h-14 px-10 bg-white text-black hover:bg-white/90 rounded-xl font-bold text-base transition-all active:scale-95"
           >
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Search"}
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Search Database"}
           </Button>
         </form>
       </div>
 
-      {hasSearched && !loading && (
+      {hasSearched && results.length === 0 && !loading && (
+        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm text-center px-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="h-20 w-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
+            <AlertCircle className="h-10 w-10 text-red-500" />
+          </div>
+          <h3 className="text-xl font-bold text-slate-900">No ID Found with number: {idNumber}</h3>
+          <p className="text-slate-500 mt-2 max-w-sm mx-auto">
+            We haven't received a report for this ID yet. Don't worry, someone might find it soon!
+          </p>
+          <div className="mt-8">
+            <Button 
+              onClick={handleWatchID}
+              disabled={notifying}
+              className="h-14 px-8 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold transition-all shadow-lg shadow-blue-200 flex items-center gap-2"
+            >
+              {notifying ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bell className="h-5 w-5" />}
+              Notify me when it's found
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {hasSearched && results.length > 0 && !loading && (
         <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500">
           <h3 className="text-xl font-bold text-slate-900 px-1">
             {results.length} {results.length === 1 ? 'Result' : 'Results'} Found
           </h3>
           
-          {results.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4">
-              {results.map((id) => (
-                <Card key={id.id} className="border-slate-200 shadow-sm rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row justify-between gap-6">
-                      <div className="space-y-4 flex-1">
-                        <div className="flex items-center gap-4">
-                          <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xl">
-                            {id.fullName.charAt(0)}
-                          </div>
-                          <div>
-                            <h4 className="text-xl font-bold text-slate-900">{id.fullName}</h4>
-                            <p className="text-slate-500 font-medium">ID Number: {id.idNumber}</p>
-                          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {results.map((id) => (
+              <Card key={id.id} className="border-slate-200 shadow-sm rounded-2xl overflow-hidden hover:shadow-md transition-shadow">
+                <CardContent className="p-6">
+                  <div className="flex flex-col md:flex-row justify-between gap-6">
+                    <div className="space-y-4 flex-1">
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xl">
+                          {id.fullName.charAt(0)}
                         </div>
-                        
-                        <div className="grid grid-cols-1 gap-4 pt-2">
-                          <div className="flex items-center gap-3 text-slate-600">
-                            <MapPin className="h-4 w-4 text-slate-400" />
-                            <span className="text-sm">{id.foundLocation}</span>
-                          </div>
+                        <div>
+                          <h4 className="text-xl font-bold text-slate-900">{id.fullName}</h4>
+                          <p className="text-slate-500 font-medium">ID Number: {id.idNumber}</p>
                         </div>
                       </div>
-
-                      <div className="flex flex-col justify-end items-end gap-4">
-                        {id.status === "pending" && (
-                          <Button 
-                            onClick={() => handleClaim(id)} 
-                            disabled={claiming === id.id}
-                            className="rounded-xl px-6 bg-blue-600 hover:bg-blue-700"
-                          >
-                            {claiming === id.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              "Claim ID"
-                            )}
-                          </Button>
-                        )}
+                      
+                      <div className="grid grid-cols-1 gap-4 pt-2">
+                        <div className="flex items-center gap-3 text-slate-600">
+                          <MapPin className="h-4 w-4 text-slate-400" />
+                          <span className="text-sm">{id.foundLocation}</span>
+                        </div>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card className="border-dashed border-slate-200 bg-slate-50/50 rounded-2xl">
-              <CardContent className="p-12 text-center">
-                <div className="mx-auto bg-slate-100 h-16 w-16 rounded-full flex items-center justify-center mb-4">
-                  <Search className="h-8 w-8 text-slate-400" />
-                </div>
-                <h4 className="text-lg font-bold text-slate-900">No matching ID found</h4>
-                <p className="text-slate-500 max-w-sm mx-auto mt-2">
-                  We haven't found an ID matching that number yet. Check back later or subscribe for alerts.
-                </p>
-              </CardContent>
-            </Card>
-          )}
+
+                    <div className="flex flex-col justify-end items-end gap-4">
+                      {id.status === "pending" && (
+                        <Button 
+                          onClick={() => handleClaim(id)} 
+                          disabled={claiming === id.id}
+                          className="rounded-xl px-6 bg-blue-600 hover:bg-blue-700"
+                        >
+                          {claiming === id.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Claim ID"
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
     </div>

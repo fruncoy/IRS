@@ -76,6 +76,27 @@ export default function MyUploads() {
     }
   };
 
+  const handleRejectClaim = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "found_ids", id), {
+        status: "pending",
+        claimedBy: null,
+        claimedAt: null
+      });
+      toast({
+        title: "Claim Rejected",
+        description: "The claim has been rejected and the ID is back to pending.",
+      });
+      fetchIds();
+    } catch (error: any) {
+      toast({
+        title: "Action Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "pending": return "bg-yellow-100 text-yellow-800 border-yellow-200";
@@ -136,15 +157,26 @@ export default function MyUploads() {
                     <TableCell className="text-right px-6">
                       <div className="flex items-center justify-end gap-2">
                         {id.status === "owner_found" && (
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="gap-2 rounded-xl border-green-200 bg-green-50 text-green-700 hover:bg-green-100 hover:text-green-800"
-                            onClick={() => handleMarkAsRecovered(id.id)}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                            Mark Recovered
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="gap-2 rounded-xl border-green-200 bg-green-50 text-green-700 hover:bg-green-100 hover:text-green-800"
+                              onClick={() => handleMarkAsRecovered(id.id)}
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                              Confirm Handover
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="gap-2 rounded-xl border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800"
+                              onClick={() => handleRejectClaim(id.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Not the Owner
+                            </Button>
+                          </div>
                         )}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

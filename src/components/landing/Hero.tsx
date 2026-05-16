@@ -5,31 +5,31 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CustomSelect } from "@/components/ui/custom-select";
 import { motion, AnimatePresence } from "framer-motion";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs, setDoc, doc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Bell } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 export const Hero = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [idNumber, setIdNumber] = useState("");
-  const [month, setMonth] = useState("");
-  const [day, setDay] = useState("");
-  const [year, setYear] = useState("");
   const [loading, setLoading] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const [searchResult, setSearchResult] = useState<"found" | "not_found" | null>(null);
   const router = useRouter();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!idNumber || !month || !day || !year) return;
+    if (!idNumber) return;
 
     setLoading(true);
     setSearchResult(null);
     try {
-      const dob = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
       const q = query(
         collection(db, "found_ids"),
-        where("idNumber", "==", idNumber),
-        where("dob", "==", dob)
+        where("idNumber", "==", idNumber)
       );
       const snapshot = await getDocs(q);
       
@@ -45,27 +45,69 @@ export const Hero = () => {
     }
   };
 
-  const proceedToClaim = () => {
-    router.push(`/dashboard/search?idNumber=${idNumber}&month=${month}&day=${day}&year=${year}`);
+  const handleWatchID = async () => {
+    if (!user) {
+      router.push("/login?redirect=/dashboard/watchlist");
+      return;
+    }
+
+    setNotifying(true);
+    try {
+      // Check if already watching
+      const watchId = `${user.uid}_${idNumber}`;
+      const watchRef = doc(db, "id_watch_list", watchId);
+      const watchSnap = await getDoc(watchRef);
+
+      if (watchSnap.exists()) {
+        toast({
+          title: "Already watching",
+          description: "You have already requested a notification for this ID.",
+        });
+        router.push("/dashboard/watchlist");
+        return;
+      }
+      
+      await setDoc(watchRef, {
+        idNumber,
+        userId: user.uid,
+        email: user.email,
+        createdAt: serverTimestamp(),
+        status: "pending"
+      });
+
+      // Send Watch Request Confirmation Email
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toEmail: user.email,
+          type: "WATCH_REQUEST",
+          idNumber,
+          ownerName: user.displayName || user.email?.split('@')[0],
+        }),
+      });
+
+      toast({
+        title: "Alert set!",
+        description: `We'll notify you if ID ${idNumber} is reported.`,
+      });
+
+      // Redirect to watchlist page to show the new record
+      router.push("/dashboard/watchlist");
+    } catch (error: any) {
+      toast({
+        title: "Failed to set alert",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setNotifying(false);
+    }
   };
 
-  const months = [
-    { value: "01", label: "January" },
-    { value: "02", label: "February" },
-    { value: "03", label: "March" },
-    { value: "04", label: "April" },
-    { value: "05", label: "May" },
-    { value: "06", label: "June" },
-    { value: "07", label: "July" },
-    { value: "08", label: "August" },
-    { value: "09", label: "September" },
-    { value: "10", label: "October" },
-    { value: "11", label: "November" },
-    { value: "12", label: "December" },
-  ];
-
-  const days = Array.from({ length: 31 }, (_, i) => (i + 1).toString().padStart(2, '0'));
-  const years = Array.from({ length: 100 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const proceedToClaim = () => {
+    router.push(`/dashboard/search?idNumber=${idNumber}`);
+  };
 
   return (
     <section className="bg-[#020202] pt-12 pb-24 relative rounded-br-[20px] md:rounded-br-[40px] z-20">
@@ -109,34 +151,6 @@ export const Hero = () => {
                     required
                   />
                 </div>
-                <div className="flex-[1.5] w-full flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-2 h-14 overflow-visible">
-                  <CustomSelect
-                    value={month}
-                    onChange={setMonth}
-                    options={months}
-                    placeholder="Month"
-                    triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/20 hover:border-none focus:ring-0"
-                    dropdownClassName="bg-[#121212]/98 border-white/10 text-white backdrop-blur-3xl"
-                  />
-                  <div className="w-px h-6 bg-white/10" />
-                  <CustomSelect
-                    value={day}
-                    onChange={setDay}
-                    options={days.map((d) => ({ value: d, label: d }))}
-                    placeholder="Day"
-                    triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/20 hover:border-none focus:ring-0"
-                    dropdownClassName="bg-[#121212]/98 border-white/10 text-white backdrop-blur-3xl"
-                  />
-                  <div className="w-px h-6 bg-white/10" />
-                  <CustomSelect
-                    value={year}
-                    onChange={setYear}
-                    options={years.map((y) => ({ value: y, label: y }))}
-                    placeholder="Year"
-                    triggerClassName="bg-transparent border-none h-full text-white placeholder:text-white/20 hover:border-none focus:ring-0"
-                    dropdownClassName="bg-[#121212]/98 border-white/10 text-white backdrop-blur-3xl"
-                  />
-                </div>
                 <Button
                   type="submit"
                   disabled={loading}
@@ -176,13 +190,23 @@ export const Hero = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="mt-6 p-6 rounded-3xl bg-red-500/10 border border-red-500/20 backdrop-blur-md flex items-center gap-4 text-red-400"
+                  className="mt-6 p-6 rounded-3xl bg-red-500/10 border border-red-500/20 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-4"
                 >
-                  <AlertCircle className="h-8 w-8" />
-                  <div>
-                    <p className="font-bold text-lg text-white">No match found yet.</p>
-                    <p className="text-red-400/80">We haven't received a report for this ID number. Please check back later.</p>
+                  <div className="flex items-center gap-4 text-red-400">
+                    <AlertCircle className="h-8 w-8" />
+                    <div>
+                      <p className="font-bold text-lg text-white">No match found yet.</p>
+                      <p className="text-red-400/80">We haven't received a report for this ID number.</p>
+                    </div>
                   </div>
+                  <Button 
+                    onClick={handleWatchID}
+                    disabled={notifying}
+                    className="w-full md:w-auto h-12 px-8 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all border border-white/10 flex items-center gap-2"
+                  >
+                    {notifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+                    {user ? "Notify me when found" : "Login to get notified"}
+                  </Button>
                 </motion.div>
               )}
             </AnimatePresence>

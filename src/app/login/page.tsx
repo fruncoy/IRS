@@ -54,6 +54,21 @@ function AuthContent() {
           phoneNumber,
           createdAt: serverTimestamp(),
         });
+
+        // Send Welcome Email
+        try {
+          await fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              toEmail: email,
+              type: "WELCOME",
+              ownerName: fullName,
+            }),
+          });
+        } catch (emailError) {
+          console.error("Welcome email failed:", emailError);
+        }
       }
       router.push(redirect);
     } catch (error: any) {
@@ -78,12 +93,30 @@ function AuthContent() {
       const docSnap = await getDoc(userDoc);
       
       if (!docSnap.exists() || mode === "signup") {
+        const isNewUser = !docSnap.exists();
         await setDoc(userDoc, {
           uid: user.uid,
           fullName: user.displayName || "Google User",
           email: user.email,
           createdAt: serverTimestamp(),
         }, { merge: true });
+
+        // Send Welcome Email for new users
+        if (isNewUser) {
+          try {
+            await fetch("/api/notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                toEmail: user.email,
+                type: "WELCOME",
+                ownerName: user.displayName,
+              }),
+            });
+          } catch (emailError) {
+            console.error("Welcome email failed:", emailError);
+          }
+        }
       }
       
       router.push(redirect);

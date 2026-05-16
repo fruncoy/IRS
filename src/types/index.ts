@@ -6,7 +6,6 @@ export const FoundIdSchema = z.object({
     .refine((val) => val.trim().split(/\s+/).length >= 2, {
       message: "Please enter at least two names (First and Last name)",
     }),
-  dob: z.string().min(1, "Date of birth is required"),
   idNumber: z.string().min(5, "ID number must be at least 5 characters"),
   foundLocation: z.string().min(3, "Found location is required"),
   finderName: z.string().min(2, "Finder name is required"),
