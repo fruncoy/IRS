@@ -68,13 +68,13 @@ export const Navbar = () => {
             </AnimatePresence>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 md:space-x-4">
             {user ? (
-              <Button asChild variant="secondary" className="bg-white text-black hover:bg-white/90 font-semibold rounded-full px-6 transition-all duration-300">
+              <Button asChild variant="secondary" className="bg-white text-black hover:bg-white/90 font-semibold rounded-full px-4 md:px-6 h-9 md:h-10 text-xs md:text-sm transition-all duration-300">
                 <Link href="/dashboard">Dashboard</Link>
               </Button>
             ) : (
-              <Button asChild className="bg-white text-black hover:bg-white/90 font-semibold border-none rounded-full px-6 transition-all duration-300">
+              <Button asChild className="bg-white text-black hover:bg-white/90 font-semibold border-none rounded-full px-4 md:px-6 h-9 md:h-10 text-xs md:text-sm transition-all duration-300">
                 <Link href="/login">Report/Recover ID</Link>
               </Button>
             )}
@@ -91,14 +91,14 @@ export const Navbar = () => {
               transition={{ duration: 0.4, ease: "easeInOut" }}
               className="overflow-hidden"
             >
-              <div className="flex items-center space-x-2 pb-4 overflow-x-auto no-scrollbar">
+              <div className="flex items-center gap-1.5 md:gap-2 pb-4 overflow-x-auto no-scrollbar">
                 {navButtons.map((btn) => (
                   <Link
                     key={btn.name}
                     href={btn.href}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 text-white text-sm font-medium hover:bg-white/10 transition-colors whitespace-nowrap"
+                    className="flex items-center gap-1.5 md:gap-2 px-3 md:px-4 py-2 rounded-full border border-white/20 text-white text-[11px] md:text-sm font-medium hover:bg-white/10 transition-colors whitespace-nowrap"
                   >
-                    <btn.icon className="h-4 w-4" />
+                    <btn.icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
                     {btn.name}
                   </Link>
                 ))}
