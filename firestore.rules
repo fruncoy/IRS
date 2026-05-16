@@ -3,35 +3,33 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 1. Users Collection: Only the owner can read/write their own profile
+    // 1. Users Collection: Private. Only the owner can read/write their own profile.
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // 2. Found IDs Collection: Authenticated users can create/read/update
+    // 2. Found IDs Collection: 
+    // - Public Read: Anyone (even logged out) can search to see if their ID is found.
+    // - Secure Write: Only logged-in users can report a found ID or update status.
     match /found_ids/{id} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
+      allow read: if true; 
+      allow create, update: if request.auth != null;
       allow delete: if request.auth != null && resource.data.createdBy == request.auth.uid;
     }
 
-    // 3. ID Watch List: Users can only manage their own watchlist items
+    // 3. ID Watch List: Private. Users can only manage their own watchlist items.
     match /id_watch_list/{watchId} {
-      // Allow getting a single document
+      // Allow getting a single document for duplicate checks
       allow get: if request.auth != null; 
       
-      // Allow listing/querying only their own items
+      // Allow listing only their own items
       allow list: if request.auth != null && resource.data.userId == request.auth.uid;
       
       // Allow creating only if the data matches their UID
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
       
-      // Allow updating only their own items
-      allow update: if request.auth != null && resource.data.userId == request.auth.uid;
-
-      // Allow deleting only their own items
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      // Allow updating/deleting only their own items
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
   }
 }
