@@ -1,32 +1,38 @@
 "use client";
 
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useState } from "react";
-import { collection, query, where, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { useEffect, useState, useCallback } from "react";
+import { collection, query, where, getDocs, deleteDoc, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Bell, Trash2, Clock, AlertCircle } from "lucide-react";
+import { Loader2, Bell, Trash2, Clock, AlertCircle, CheckCircle2, ArrowRight, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
+import { useRouter } from "next/navigation";
 
 interface WatchItem {
   id: string;
   idNumber: string;
-  dob: string;
   createdAt: any;
-  status: "pending" | "notified";
+  status: "pending" | "notified" | "claimed" | "recovered";
 }
 
 export default function MyWatchlist() {
   const { user } = useAuth();
   const [items, setItems] = useState<WatchItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const { toast } = useToast();
+  const router = useRouter();
 
-  const fetchWatchlist = async () => {
+  const fetchWatchlist = useCallback(async (isAuto = false) => {
     if (!user) return;
+    if (!isAuto) setLoading(true);
+    else setIsRefreshing(true);
+
     try {
       const q = query(
         collection(db, "id_watch_list"),
@@ -37,8 +43,42 @@ export default function MyWatchlist() {
         id: doc.id,
         ...doc.data()
       })) as WatchItem[];
+
+      let matchFound = false;
+
+      // AUTO-CHECK FOR MATCHES
+      for (const item of watchItems) {
+        if (item.status === "pending" || item.status === "notified") {
+          const foundQ = query(
+            collection(db, "found_ids"),
+            where("idNumber", "==", item.idNumber),
+            where("status", "==", "pending")
+          );
+          const foundSnap = await getDocs(foundQ);
+          const hasActiveMatch = !foundSnap.empty;
+
+          if (hasActiveMatch && item.status === "pending") {
+            matchFound = true;
+            // Update local state status to reflect match found
+            item.status = "notified";
+            // Update Firestore so it persists
+            await updateDoc(doc(db, "id_watch_list", item.id), {
+              status: "notified",
+              notifiedAt: serverTimestamp()
+            });
+          } else if (!hasActiveMatch && item.status === "notified") {
+            // Match is no longer available (e.g. deleted or claimed by someone else)
+            // We revert to pending to resume monitoring
+            item.status = "pending";
+            await updateDoc(doc(db, "id_watch_list", item.id), {
+              status: "pending",
+              notifiedAt: null
+            });
+          }
+        }
+      }
       
-      // Sort manually since we might not have a composite index yet
+      // Sort manually
       watchItems.sort((a, b) => {
         const dateA = a.createdAt?.seconds || 0;
         const dateB = b.createdAt?.seconds || 0;
@@ -46,16 +86,32 @@ export default function MyWatchlist() {
       });
       
       setItems(watchItems);
+      setLastUpdated(new Date());
+
+      if (matchFound && isAuto) {
+        toast({
+          title: "Good news!",
+          description: "A match was found for one of your watched IDs!",
+        });
+      }
     } catch (error) {
       console.error("Error fetching watchlist:", error);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, [user, toast]);
 
   useEffect(() => {
     fetchWatchlist();
-  }, [user]);
+
+    // Set up auto-refresher every 15 seconds
+    const interval = setInterval(() => {
+      fetchWatchlist(true);
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [fetchWatchlist]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -74,13 +130,9 @@ export default function MyWatchlist() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex h-[400px] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
-      </div>
-    );
-  }
+  const handleClaimFromWatchlist = (idNumber: string) => {
+    router.push(`/dashboard/search?idNumber=${idNumber}`);
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
@@ -92,7 +144,28 @@ export default function MyWatchlist() {
       </div>
 
       <AnimatePresence mode="wait">
-        {items.length === 0 ? (
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-64 bg-white rounded-3xl border border-slate-100 shadow-sm animate-pulse flex flex-col p-8 space-y-6">
+                <div className="flex justify-end">
+                  <div className="h-10 w-10 bg-slate-50 rounded-xl" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-20 bg-slate-50 rounded" />
+                  <div className="h-8 w-48 bg-slate-100 rounded" />
+                </div>
+                <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 bg-slate-100 rounded-full" />
+                    <div className="h-3 w-24 bg-slate-50 rounded" />
+                  </div>
+                  <div className="h-10 w-32 bg-slate-100 rounded-xl" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : items.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -149,12 +222,27 @@ export default function MyWatchlist() {
 
                     <div className="pt-4 border-t border-slate-50 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${item.status === 'pending' ? 'bg-amber-400 animate-pulse' : 'bg-green-500'}`} />
+                        <div className={`h-2 w-2 rounded-full ${
+                          item.status === 'pending' ? 'bg-amber-400 animate-pulse' : 
+                          item.status === 'notified' ? 'bg-green-500' :
+                          'bg-blue-500'
+                        }`} />
                         <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                          {item.status === 'pending' ? 'Monitoring' : 'Notified'}
+                          {item.status === 'pending' ? 'Monitoring' : 
+                           item.status === 'notified' ? 'Match Found!' : 
+                           item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                         </span>
                       </div>
-                      {item.status === 'pending' && (
+                      
+                      {item.status === 'notified' ? (
+                        <Button 
+                          onClick={() => handleClaimFromWatchlist(item.idNumber)}
+                          className="h-10 px-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg shadow-green-100"
+                        >
+                          Claim ID
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : item.status === 'pending' && (
                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
                           <AlertCircle className="h-3 w-3" />
                           AUTO-WATCH ACTIVE

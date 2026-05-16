@@ -8,9 +8,10 @@ Simple. Mindful. Smart.
 - **Secure Reports**: Finder verification with OCR support.
 
 ## Security (Firestore)
-- Users: `match /users/{id} { allow read, write: if auth.uid == id }`
-- IDs: `match /found_ids/{id} { allow read; allow write: if auth }`
-- Watchlist: `match /id_watch_list/{id} { allow read, write: if auth.uid == userId }`
+Security rules are managed in [firestore.rules](file:///c:/BBIT%204.2/IRS/firestore.rules).
+- Users: Private owner access.
+- IDs: Public search, secure reporting.
+- Watchlist: Private owner access, system matching.
 
 ## Config
 - Environment variables managed in `.env.local`

@@ -336,25 +336,7 @@ export default function ReportFoundId() {
         </CardHeader>
         <CardContent className="pt-8">
           <Form {...form}>
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-8 flex items-start gap-4">
-                  <div className="p-2 bg-amber-100 rounded-xl">
-                    <ShieldCheck className="h-5 w-5 text-amber-600" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider">Verification Guide for Heroes</h4>
-                    <p className="text-amber-700 text-sm mt-1 leading-relaxed">
-                      To keep things simple, we no longer ask for the Date of Birth here. Instead, when someone contacts you to claim this ID, **please ask them to verify these 4 details** to be 100% sure they are the owner:
-                    </p>
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
-                      {['Date of Birth', 'Place of Issue', 'Place of Birth', 'County / Ward'].map((item) => (
-                        <li key={item} className="flex items-center gap-2 text-sm font-bold text-amber-800 bg-amber-100/50 px-3 py-2 rounded-lg">
-                          <CheckCircle2 className="h-4 w-4 text-amber-600" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
+
 
                 <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-8 relative">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

@@ -46,9 +46,18 @@ export default function ClaimsPage() {
       // Fetch ID details for each claim
       const enrichedClaims = await Promise.all(
         claimsData.map(async (claim) => {
-          const idDoc = await getDoc(doc(db, "found_ids", claim.foundIdId));
-          if (idDoc.exists()) {
-            return { ...claim, idDetails: { id: idDoc.id, ...idDoc.data() } as FoundId };
+          // Handle both field names for backward compatibility during migration
+          const id = claim.foundIdId || (claim as any).foundId;
+          
+          if (!id) return claim;
+
+          try {
+            const idDoc = await getDoc(doc(db, "found_ids", id));
+            if (idDoc.exists()) {
+              return { ...claim, foundIdId: id, idDetails: { id: idDoc.id, ...idDoc.data() } as FoundId };
+            }
+          } catch (e) {
+            console.error(`Error fetching details for claim ${claim.id}:`, e);
           }
           return claim;
         })
@@ -70,8 +79,11 @@ export default function ClaimsPage() {
     if (!user) return;
     setCancelling(claim.id);
     try {
+      const id = claim.foundIdId || (claim as any).foundId;
+      if (!id) throw new Error("ID reference not found");
+
       // 1. Revert ID status to pending
-      await updateDoc(doc(db, "found_ids", claim.foundIdId), {
+      await updateDoc(doc(db, "found_ids", id), {
         status: "pending"
       });
 

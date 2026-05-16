@@ -68,7 +68,9 @@ export default function ClaimIdPage({ params }: { params: Promise<{ id: string }
 
       // 2. Update found_id status
       await updateDoc(doc(db, "found_ids", foundId.id), {
-        status: "owner_found"
+        status: "owner_found",
+        claimedBy: user.uid,
+        claimedAt: serverTimestamp()
       });
 
       setClaimed(true);
@@ -122,10 +124,6 @@ export default function ClaimIdPage({ params }: { params: Promise<{ id: string }
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">ID Number</p>
                   <p className="text-lg font-medium text-slate-900">********{foundId.idNumber.slice(-3)}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Date of Birth</p>
-                  <p className="text-lg font-medium text-slate-900">{foundId.dob}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Found Location</p>

@@ -67,25 +67,48 @@ export const Hero = () => {
         return;
       }
       
+      // 1. Check if ID is ALREADY in found_ids
+      const foundQ = query(
+        collection(db, "found_ids"),
+        where("idNumber", "==", idNumber),
+        where("status", "==", "pending")
+      );
+      const foundSnap = await getDocs(foundQ);
+      const isAlreadyFound = !foundSnap.empty;
+
       await setDoc(watchRef, {
         idNumber,
         userId: user.uid,
         email: user.email,
         createdAt: serverTimestamp(),
-        status: "pending"
+        status: isAlreadyFound ? "notified" : "pending"
       });
 
-      // Send Watch Request Confirmation Email
-      await fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toEmail: user.email,
-          type: "WATCH_REQUEST",
-          idNumber,
-          ownerName: user.displayName || user.email?.split('@')[0],
-        }),
-      });
+      // 2. If it was already found, send the MATCH email immediately
+      if (isAlreadyFound) {
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: user.email,
+            type: "MATCH_FOUND",
+            idNumber,
+            ownerName: user.displayName || user.email?.split('@')[0],
+          }),
+        });
+      } else {
+        // Otherwise send the standard WATCH request confirmation
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: user.email,
+            type: "WATCH_REQUEST",
+            idNumber,
+            ownerName: user.displayName || user.email?.split('@')[0],
+          }),
+        });
+      }
 
       toast({
         title: "Alert set!",

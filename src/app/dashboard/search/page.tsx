@@ -34,13 +34,14 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { CustomSelect } from "@/components/ui/custom-select";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 
 export default function SearchIdPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [idNumber, setIdNumber] = useState(searchParams.get("idNumber") || "");
   
   const [loading, setLoading] = useState(false);
@@ -69,25 +70,48 @@ export default function SearchIdPage() {
         return;
       }
       
+      // 1. Check if ID is ALREADY in found_ids
+      const foundQ = query(
+        collection(db, "found_ids"),
+        where("idNumber", "==", idNumber),
+        where("status", "==", "pending")
+      );
+      const foundSnap = await getDocs(foundQ);
+      const isAlreadyFound = !foundSnap.empty;
+
       await setDoc(watchRef, {
         idNumber,
         userId: user.uid,
         email: user.email,
         createdAt: serverTimestamp(),
-        status: "pending"
+        status: isAlreadyFound ? "notified" : "pending"
       });
 
-      // Send Watch Request Confirmation Email
-      await fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toEmail: user.email,
-          type: "WATCH_REQUEST",
-          idNumber,
-          ownerName: user.displayName || user.email?.split('@')[0],
-        }),
-      });
+      // 2. If it was already found, send the MATCH email immediately
+      if (isAlreadyFound) {
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: user.email,
+            type: "MATCH_FOUND",
+            idNumber,
+            ownerName: user.displayName || user.email?.split('@')[0],
+          }),
+        });
+      } else {
+        // Otherwise send the standard WATCH request confirmation
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toEmail: user.email,
+            type: "WATCH_REQUEST",
+            idNumber,
+            ownerName: user.displayName || user.email?.split('@')[0],
+          }),
+        });
+      }
 
       toast({
         title: "Alert set!",
@@ -151,19 +175,17 @@ export default function SearchIdPage() {
       // 1. Update the found_id status to owner_found
       const idRef = doc(db, "found_ids", foundId.id);
       await updateDoc(idRef, {
-        status: "owner_found"
+        status: "owner_found",
+        claimedBy: user.uid,
+        claimedAt: serverTimestamp()
       });
 
       // 2. Create a claim record
       await addDoc(collection(db, "claims"), {
-        foundId: foundId.id,
+        foundIdId: foundId.id,
         claimerUid: user.uid,
         status: "pending",
         createdAt: serverTimestamp(),
-        idDetails: {
-          fullName: foundId.fullName,
-          idNumber: foundId.idNumber
-        }
       });
 
       setClaimedId(foundId);
@@ -182,6 +204,22 @@ export default function SearchIdPage() {
         });
       } catch (e) {
         console.error("Failed to send claim notification email", e);
+      }
+
+      // Update Watchlist status if this ID was being watched
+      try {
+        const watchId = `${user.uid}_${foundId.idNumber}`;
+        const watchRef = doc(db, "id_watch_list", watchId);
+        const watchSnap = await getDoc(watchRef);
+        
+        if (watchSnap.exists()) {
+          await updateDoc(watchRef, {
+            status: "claimed",
+            claimedAt: serverTimestamp()
+          });
+        }
+      } catch (watchError) {
+        console.error("Failed to update watchlist status:", watchError);
       }
 
       toast({
@@ -368,7 +406,7 @@ export default function SearchIdPage() {
                     </div>
 
                     <div className="flex flex-col justify-end items-end gap-4">
-                      {id.status === "pending" && (
+                      {id.status === "pending" ? (
                         <Button 
                           onClick={() => handleClaim(id)} 
                           disabled={claiming === id.id}
@@ -380,6 +418,23 @@ export default function SearchIdPage() {
                             "Claim ID"
                           )}
                         </Button>
+                      ) : id.status === "owner_found" ? (
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge className="bg-green-100 text-green-700 border-green-200 rounded-full py-1.5 px-4 font-bold">
+                            ALREADY CLAIMED
+                          </Badge>
+                          {id.claimedBy === user.uid ? (
+                            <Button asChild variant="link" size="sm" className="text-blue-600 font-bold p-0 h-auto">
+                              <Link href="/dashboard/claims">View in My Claims</Link>
+                            </Button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 font-medium italic">Claimed by another user</span>
+                          )}
+                        </div>
+                      ) : (
+                        <Badge className="bg-slate-100 text-slate-600 border-slate-200 rounded-full py-1.5 px-4 font-bold uppercase">
+                          {id.status}
+                        </Badge>
                       )}
                     </div>
                   </div>
