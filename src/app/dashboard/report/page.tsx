@@ -207,16 +207,6 @@ export default function ReportFoundId() {
   }, [showScanModal, isScanning]);
 
   const handleFormSubmit = (values: FoundIdFormValues) => {
-    if (!month || !day || !year) {
-      toast({
-        title: "Missing Date",
-        description: "Please select a valid date of birth.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const dob = `${year}-${month}-${day}`;
-    form.setValue("dob", dob);
     setShowConfirmation(true);
   };
 
